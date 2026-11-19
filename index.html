@@ -37,16 +37,6 @@
     .swatch { display:inline-block; width:14px; height:14px; border:1px solid #aaa; border-radius:3px; vertical-align:-3px; margin-right:5px; }
     .actions { display:flex; justify-content:flex-end; }
     .reset { font-size:13px; }
-    .login-card { max-width:440px; margin:28px auto; padding:20px; background:#fff; border:1px solid #ddd; border-radius:14px; }
-    .login-card h2 { margin:0 0 12px; font-size:20px; }
-    .login-card p { font-size:13px; color:#555; line-height:1.5; }
-    .login-card label { display:block; margin:12px 0 5px; font-size:13px; font-weight:650; }
-    .login-card input { width:100%; padding:12px; border:1px solid #aaa; border-radius:8px; font:inherit; }
-    .login-buttons { display:flex; gap:8px; margin-top:16px; }
-    .login-buttons button { flex:1; font-weight:700; }
-    #loginMessage { min-height:1.5em; color:#b42318; }
-    .account-bar { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:0 0 10px; font-size:12px; color:#555; }
-    .sync-status { margin:8px 0 12px; padding:9px 11px; border-radius:9px; background:#eef2ff; color:#334155; font-size:12px; }
     .note { margin-top:16px; font-size:11px; color:#777; line-height:1.5; }
     .pages { display:flex; gap:8px; margin:0 0 14px; }
     .page { flex:1; font-weight:700; }
@@ -69,21 +59,6 @@
 <body>
 <main>
   <h1>座席区画④</h1>
-  <section class="login-card" id="loginPanel">
-    <h2>ログイン</h2>
-    <p>iPhoneとiPadで同じメールアドレス・パスワードを使ってください。初めて使う場合は「新規登録」を押してください。</p>
-    <label for="loginEmail">メールアドレス</label>
-    <input id="loginEmail" type="email" autocomplete="username" placeholder="メールアドレス" required>
-    <label for="loginPassword">パスワード（6文字以上）</label>
-    <input id="loginPassword" type="password" autocomplete="current-password" placeholder="パスワード" minlength="6" required>
-    <div class="login-buttons">
-      <button id="signInButton" type="button">ログイン</button>
-      <button id="signUpButton" type="button">新規登録</button>
-    </div>
-    <p id="loginMessage" role="status"></p>
-  </section>
-  <div id="appContent" hidden>
-  <div class="account-bar"><span id="signedInEmail"></span><button id="signOutButton" type="button">ログアウト</button></div>
   <nav class="pages" aria-label="画面切り替え">
     <button class="page active" id="seatPageButton" type="button" aria-pressed="true">座席表</button>
     <button class="page" id="attendancePageButton" type="button" aria-pressed="false">出席人数カウント</button>
@@ -132,14 +107,8 @@
       </div>
     </div>
   </section>
-  <p class="sync-status" id="syncStatus" role="status">共有設定を確認しています…</p>
-  <p class="note">iPhone・iPadで同じデータを共有します。共有設定が完了するまでは、この端末内に保存されます。</p>
-</div>
+  <p class="note">座席の状態と空席カウントはこのiPhoneのブラウザ内に保存されます。Safariの履歴・Webサイトデータを消去すると保存内容も消える場合があります。</p>
 </main>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="./firebase-config.js"></script>
 <script>
 (() => {
   const ROWS = 16, FIRST_SEAT = 24, COLS = 8;
@@ -161,112 +130,8 @@
   const grid = document.getElementById("grid");
   const total = ROWS * COLS - BLOCKED.size;
   document.getElementById("total").textContent = total;
-  const syncStatus = document.getElementById("syncStatus");
-  let cloudRef = null, cloudReady = false, applyingRemote = false, unsubscribeCloud = null;
-  function saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...used])); } catch (_) {} }
-  function saveVacancyLocal() { try { localStorage.setItem(VACANCY_KEY, String(vacancyCount)); } catch (_) {} }
-  function setSyncMessage(message) { syncStatus.textContent = message; }
-  function refreshAllSeats() {
-    document.querySelectorAll(".seat:not(.blocked)").forEach(b => {
-      const row = Number(b.getAttribute("aria-label").match(/第(\d+)列/)[1]);
-      const seat = Number(b.textContent);
-      renderSeat(b, `${row}-${seat}`);
-    });
-    updateStats(); updateVacancy();
-  }
-  async function writeCloud(mutator) {
-    if (!cloudReady || !cloudRef) { saveLocal(); saveVacancyLocal(); return; }
-    try {
-      await firebase.firestore().runTransaction(async tx => {
-        const snap = await tx.get(cloudRef);
-        const data = snap.exists ? snap.data() : { used: [...used], vacancyCount };
-        const next = { used: Array.isArray(data.used) ? data.used.filter(k => typeof k === "string" && !BLOCKED.has(k)) : [], vacancyCount: Number.isFinite(Number(data.vacancyCount)) ? Math.max(0, Math.min(126, Math.floor(Number(data.vacancyCount)))) : 0 };
-        mutator(next);
-        tx.set(cloudRef, { used: next.used, vacancyCount: next.vacancyCount, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      });
-    } catch (e) { setSyncMessage("同期に失敗しました。通信状態を確認してください。"); }
-  }
-  function startCloudSync() {
-    const cfg = window.FIREBASE_CONFIG;
-    if (!cfg || !cfg.apiKey || String(cfg.apiKey).includes("ここに")) {
-      setSyncMessage("Firebase設定が未完了です。");
-      return;
-    }
-    try {
-      if (!firebase.apps.length) firebase.initializeApp(cfg);
-      if (unsubscribeCloud) unsubscribeCloud();
-      cloudRef = firebase.firestore().collection("seatmaps").doc("kaku4");
-      unsubscribeCloud = cloudRef.onSnapshot(snap => {
-        if (!snap.exists) {
-          cloudRef.set({ used: [...used], vacancyCount, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-          return;
-        }
-        const data = snap.data();
-        applyingRemote = true;
-        used = new Set(Array.isArray(data.used) ? data.used.filter(k => typeof k === "string" && !BLOCKED.has(k)) : []);
-        const n = Number(data.vacancyCount);
-        vacancyCount = Number.isFinite(n) ? Math.max(0, Math.min(126, Math.floor(n))) : 0;
-        saveLocal(); saveVacancyLocal(); refreshAllSeats();
-        applyingRemote = false;
-        cloudReady = true;
-        setSyncMessage("✓ iPhone・iPadと自動共有中");
-      }, () => setSyncMessage("クラウドとの接続に失敗しました。Firestoreルールを確認してください。"));
-    } catch (_) { setSyncMessage("Firebase設定を確認してください。"); }
-  }
-  const loginPanel = document.getElementById("loginPanel");
-  const appContent = document.getElementById("appContent");
-  const loginMessage = document.getElementById("loginMessage");
-  function authError(e) {
-    const messages = {
-      "auth/invalid-email":"メールアドレスの形式を確認してください。",
-      "auth/weak-password":"パスワードは6文字以上にしてください。",
-      "auth/email-already-in-use":"このメールアドレスは登録済みです。「ログイン」をお試しください。",
-      "auth/invalid-credential":"メールアドレスまたはパスワードが違います。",
-      "auth/user-not-found":"アカウントがありません。「新規登録」をお試しください。",
-      "auth/wrong-password":"パスワードが違います。",
-      "auth/network-request-failed":"通信状態を確認してください。"
-    };
-    loginMessage.textContent = messages[e.code] || "認証に失敗しました。入力内容と通信状態を確認してください。";
-  }
-  function credentials() {
-    const email = document.getElementById("loginEmail").value.trim();
-    const password = document.getElementById("loginPassword").value;
-    if (!email || !password) { loginMessage.textContent = "メールアドレスとパスワードを入力してください。"; return null; }
-    return {email,password};
-  }
-  document.getElementById("signUpButton").addEventListener("click", async () => {
-    const c = credentials(); if (!c) return;
-    loginMessage.textContent = "登録しています…";
-    try { await firebase.auth().createUserWithEmailAndPassword(c.email,c.password); }
-    catch(e) { authError(e); }
-  });
-  document.getElementById("signInButton").addEventListener("click", async () => {
-    const c = credentials(); if (!c) return;
-    loginMessage.textContent = "ログインしています…";
-    try { await firebase.auth().signInWithEmailAndPassword(c.email,c.password); }
-    catch(e) { authError(e); }
-  });
-  document.getElementById("signOutButton").addEventListener("click", async () => {
-    await firebase.auth().signOut();
-    if (unsubscribeCloud) unsubscribeCloud();
-    unsubscribeCloud = null; cloudReady = false; cloudRef = null;
-  });
-  try {
-    if (!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
-    firebase.auth().onAuthStateChanged(user => {
-      cloudReady = false;
-      if (user) {
-        loginPanel.hidden = true; appContent.hidden = false;
-        document.getElementById("signedInEmail").textContent = user.email || "ログイン中";
-        setSyncMessage("クラウドに接続しています…");
-        startCloudSync();
-      } else {
-        loginPanel.hidden = false; appContent.hidden = true;
-        document.getElementById("signedInEmail").textContent = "";
-        setSyncMessage("ログインすると共有が始まります。");
-      }
-    });
-  } catch (_) { loginMessage.textContent = "Firebase設定を確認してください。"; }
+  function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...used])); } catch (_) {} }
+  function saveVacancy() { try { localStorage.setItem(VACANCY_KEY, String(vacancyCount)); } catch (_) {} }
   function updateVacancy() {
     document.getElementById("vacancyCount").textContent = vacancyCount;
     document.getElementById("attendeeCount").textContent = 126 - vacancyCount;
@@ -285,14 +150,14 @@
   document.getElementById("seatPageButton").addEventListener("click", () => showPage("seat"));
   document.getElementById("attendancePageButton").addEventListener("click", () => showPage("attendance"));
   document.getElementById("countVacancy").addEventListener("click", () => {
-    if (vacancyCount < 126) { vacancyCount++; saveVacancyLocal(); updateVacancy(); writeCloud(d => { d.vacancyCount = Math.min(126, d.vacancyCount + 1); }); }
+    if (vacancyCount < 126) { vacancyCount++; saveVacancy(); updateVacancy(); }
   });
   document.getElementById("undoVacancy").addEventListener("click", () => {
-    if (vacancyCount > 0) { vacancyCount--; saveVacancyLocal(); updateVacancy(); writeCloud(d => { d.vacancyCount = Math.max(0, d.vacancyCount - 1); }); }
+    if (vacancyCount > 0) { vacancyCount--; saveVacancy(); updateVacancy(); }
   });
   document.getElementById("resetVacancy").addEventListener("click", () => {
     if (!confirm("空席カウントを0に戻しますか？")) return;
-    vacancyCount = 0; saveVacancyLocal(); updateVacancy(); writeCloud(d => { d.vacancyCount = 0; });
+    vacancyCount = 0; saveVacancy(); updateVacancy();
   });
   function updateStats() {
     document.getElementById("used").textContent = used.size;
@@ -326,8 +191,7 @@
         b.textContent=seatNo;
         b.addEventListener("click", () => {
           if (mode==="paint") used.add(key); else used.delete(key);
-          saveLocal(); renderSeat(b,key); updateStats();
-          writeCloud(d => { const set = new Set(d.used); if (mode === "paint") set.add(key); else set.delete(key); d.used = [...set]; });
+          save(); renderSeat(b,key); updateStats();
         });
         renderSeat(b,key);
       }
@@ -341,7 +205,7 @@
   }
   document.getElementById("reset").addEventListener("click", () => {
     if (!confirm("全ての座席を空席に戻しますか？")) return;
-    used.clear(); saveLocal(); writeCloud(d => { d.used = []; });
+    used.clear(); save();
     document.querySelectorAll(".seat:not(.blocked)").forEach(b => b.classList.remove("used"));
     document.querySelectorAll(".seat:not(.blocked)").forEach(b => b.setAttribute("aria-pressed","false"));
     updateStats();
