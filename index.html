@@ -162,7 +162,7 @@
   const total = ROWS * COLS - BLOCKED.size;
   document.getElementById("total").textContent = total;
   const syncStatus = document.getElementById("syncStatus");
-  let cloudRef = null, cloudReady = false, applyingRemote = false;
+  let cloudRef = null, cloudReady = false, applyingRemote = false, unsubscribeCloud = null;
   function saveLocal() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...used])); } catch (_) {} }
   function saveVacancyLocal() { try { localStorage.setItem(VACANCY_KEY, String(vacancyCount)); } catch (_) {} }
   function setSyncMessage(message) { syncStatus.textContent = message; }
@@ -194,8 +194,9 @@
     }
     try {
       if (!firebase.apps.length) firebase.initializeApp(cfg);
+      if (unsubscribeCloud) unsubscribeCloud();
       cloudRef = firebase.firestore().collection("seatmaps").doc("kaku4");
-      cloudRef.onSnapshot(snap => {
+      unsubscribeCloud = cloudRef.onSnapshot(snap => {
         if (!snap.exists) {
           cloudRef.set({ used: [...used], vacancyCount, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
           return;
@@ -247,7 +248,8 @@
   });
   document.getElementById("signOutButton").addEventListener("click", async () => {
     await firebase.auth().signOut();
-    cloudReady = false; cloudRef = null;
+    if (unsubscribeCloud) unsubscribeCloud();
+    unsubscribeCloud = null; cloudReady = false; cloudRef = null;
   });
   try {
     if (!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
@@ -257,7 +259,8 @@
         loginPanel.hidden = true; appContent.hidden = false;
         document.getElementById("signedInEmail").textContent = user.email || "ログイン中";
         setSyncMessage("クラウドに接続しています…");
-            } else {
+        startCloudSync();
+      } else {
         loginPanel.hidden = false; appContent.hidden = true;
         document.getElementById("signedInEmail").textContent = "";
         setSyncMessage("ログインすると共有が始まります。");
