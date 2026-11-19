@@ -1,0 +1,49 @@
+座席区画④ iPhone・iPad共有設定ガイド
+
+このアプリはFirebase（無料枠あり）を使って、iPhoneとiPadの座席状態・空席カウントを同期します。
+共有を有効にするには、最初にFirebaseの設定が必要です。
+
+【1. Firebaseプロジェクトを作成】
+1) https://console.firebase.google.com/ を開き、Googleアカウントでログイン
+2) 「プロジェクトを作成」から新しいプロジェクトを作成（例：seatmap-kaku4）
+3) プロジェクトの概要画面でWeb（</>）アプリを追加
+4) アプリ名は「座席区画④」など任意。Firebase Hostingは選択不要
+5) 表示された firebaseConfig の値を控える
+
+【2. 匿名ログインを有効化】
+1) Firebaseコンソールの「構築」→「Authentication」→「始める」
+2) 「Sign-in method」から「匿名」を有効にして保存
+
+【3. Firestoreを作成】
+1) 「構築」→「Firestore Database」→「データベースを作成」
+2) 本番環境モードで作成
+3) 「ルール」タブを開き、以下に置き換えて公開
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /seatmaps/{document} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+
+※このルールは匿名ログイン済みの利用者に読み書きを許可します。アプリURLを知っている人がアクセスできる状態では、URLを他人に共有しないでください。より強い利用者制限が必要なら追加設定できます。
+
+【4. firebase-config.js を設定】
+1) ZIP内の firebase-config.js をテキスト編集
+2) FirebaseコンソールのWebアプリ設定にある各値で、仮の文字列を置き換える
+3) ファイル名は firebase-config.js のまま保存
+
+【5. GitHubにアップロード】
+変更したファイル一式を、現在のGitHub Pagesリポジトリ seatmap-kaku4 にアップロードしてください。
+
+【6. iPhone・iPadで利用】
+1) 両方の端末でSafariから https://tpfkmde12cwmp-ops.github.io/seatmap-kaku4/ を開く
+2) ホーム画面に追加して利用
+3) 同じアプリを開けば座席表と空席カウントが自動同期されます
+
+【注意】
+・Firebase設定を行うまでは端末内保存のままです。
+・初回のクラウド同期時、Firestoreにデータがない場合は、その端末に保存されているデータが初期データになります。最初の設定時は、残したい最新データがある端末から先に開いてください。
+・複数端末で同時に操作した場合も、カウント操作はクラウド上で加算・減算します。
